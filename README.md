@@ -44,7 +44,7 @@ All six configs pass `esphome config` on ESPHome 2026.9.0 (the partials when inc
 - **Function codes in the manuals.** Several CWT register tables list function codes "0x30" and "0x60", but the example frames in the same manuals use 0x03 (read holding registers) and 0x06 (write single register). The configs follow the example frames.
 - **"Humidity" isn't air humidity.** On the THC-S it's the substrate's volumetric water content (VWC). On the CWT-LEAF-TH it's leaf surface wetness, and a dry pad reads about 0%. The entities are named to match.
 - **Estimated pore-water EC is an approximation.** It's bulk EC ÷ VWC rather than the Hilhorst model, which needs a dielectric permittivity reading the THC-S doesn't provide. Use it for trends, not absolute values. It reports unknown below 5% VWC, and it equals bulk EC whenever the probe reads 100% VWC (for example, sitting in a beaker of solution).
-- **EC units.** The THC-S reports substrate EC in mS/cm, plus a dS/m copy for agronomy-style dashboards (1 dS/m = 1 mS/cm).
+- **EC units.** The THC-S reports substrate EC in mS/cm, plus a dS/m copy for agronomy-style dashboards (1 dS/m = 1 mS/cm). The water EC transmitter reports µS/cm, plus an mS/cm copy so reservoir and substrate EC can be compared directly.
 - **Calibration.** The leaf sensor (registers 0x0050 and 0x0051) and PAR sensor (0x0052) store calibration offsets in the sensor itself, and the configs expose them as Home Assistant number entities. The water EC transmitter is calibrated with its own button (zero, then a 1413 µS/cm standard); its config only reports the stored calibration value as a diagnostic.
 
 ## Known issues

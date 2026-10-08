@@ -70,12 +70,12 @@ sensor:
     filters:
       - multiply: 0.1
 
-  # Reservoir EC in mS/cm - same convention as the "ppm500" entities on the
-  # substrate THC-S device, so the two are directly comparable in HA.
+  # Reservoir EC in mS/cm - same unit as "Substrate Conductivity" on the
+  # THC-S substrate device, so the two are directly comparable in HA.
   - platform: template
     name: "Water EC mS"
     id: water_ec_ms
-    unit_of_measurement: "ppm500"
+    unit_of_measurement: "mS/cm"
     state_class: measurement
     accuracy_decimals: 2
     update_interval: 10s
