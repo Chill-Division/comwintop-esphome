@@ -26,16 +26,12 @@ esphome:
     version: "1.1"
 
   # Apply the EC temperature-compensation coefficient every boot so the probe
-  # is always in a known state. Priority -100 runs after all components are set up.
+  # is always in a known state. Priority -100 runs after all components are set up;
+  # the script (below the number: block) handles waiting for the probe and verifying.
   on_boot:
     priority: -100
     then:
-      - number.set:
-          id: substrate_ec_temp_coeff
-          value: ${ec_temp_coeff}
-      - logger.log:
-          format: "Wrote EC temperature coefficient %s %%/°C to probe register 0x0022"
-          args: ['"${ec_temp_coeff}"']
+      - script.execute: apply_ec_temp_coeff
 
 esp32:
   # Using the generic P4 board target
@@ -124,9 +120,10 @@ modbus_controller:
 # ---------------------------------------------------------------------------
 number:
   # Register 0x0022 | "Conductivity factor" | 0-100 = 0.0%-10.0% per °C
-  # Factory default is 0 (no temperature compensation). Set at boot from the
-  # ec_temp_coeff substitution above; this entity lets you see and adjust it
-  # from Home Assistant. Note a reboot re-applies the substitution value.
+  # (THC-S manual V1.4: PLC address 40035, read/write.) Factory default is 0
+  # (no temperature compensation). Set at boot from the ec_temp_coeff
+  # substitution by the apply_ec_temp_coeff script below; this entity lets you
+  # see and adjust it from Home Assistant. A reboot re-applies the substitution.
   - platform: modbus_controller
     modbus_controller_id: substrate_probe_config   # slow-poll controller
     name: "Substrate EC Temp Coefficient"
@@ -140,6 +137,79 @@ number:
     step: 0.1
     unit_of_measurement: "%/°C"
     entity_category: config
+
+# ---------------------------------------------------------------------------
+# Boot-time apply of the EC temperature coefficient
+# ---------------------------------------------------------------------------
+# A single blind write at boot can be lost (e.g. the probe misses it and
+# ESPHome drops it after marking the probe offline), while the number entity
+# still shows the new value. So: wait for the probe, write only if the
+# register differs, read it back to confirm, retry, and log the outcome.
+globals:
+  # Set by check_ec_temp_coeff when register 0x0022 reads back as ec_temp_coeff.
+  - id: ec_temp_coeff_ok
+    type: bool
+    restore_value: false
+    initial_value: "false"
+
+script:
+  # Reads register 0x0022 back from the probe and records whether it matches
+  # ec_temp_coeff. The read-back sensor is cleared first, so a missing reply
+  # shows up as NAN instead of a stale value.
+  - id: check_ec_temp_coeff
+    then:
+      - lambda: "id(substrate_ec_temp_coeff_readback).publish_state(NAN);"
+      - component.update: substrate_probe_config
+      - delay: 3s
+      - lambda: |-
+          const float target = ${ec_temp_coeff};
+          const float coeff = id(substrate_ec_temp_coeff_readback).state;
+          id(ec_temp_coeff_ok) = !std::isnan(coeff) && std::fabs(coeff - target) < 0.05f;
+          if (std::isnan(coeff)) {
+            ESP_LOGW("ec_temp_coeff", "No reply when reading register 0x0022");
+          } else if (!id(ec_temp_coeff_ok)) {
+            ESP_LOGW("ec_temp_coeff", "Register 0x0022 reads %.1f %%/°C, want %.1f", coeff, target);
+          }
+
+  - id: apply_ec_temp_coeff
+    mode: single
+    then:
+      # A write sent before the probe is answering gets dropped, so wait for
+      # a normal poll to succeed first.
+      - wait_until:
+          condition:
+            lambda: "return id(substrate_temperature).has_state();"
+          timeout: 2min
+      - script.execute: check_ec_temp_coeff
+      - script.wait: check_ec_temp_coeff
+      # Only write when the probe holds a different value, so its stored
+      # settings aren't rewritten on every boot.
+      - repeat:
+          count: 3
+          then:
+            - if:
+                condition:
+                  lambda: "return !id(ec_temp_coeff_ok);"
+                then:
+                  - number.set:
+                      id: substrate_ec_temp_coeff
+                      value: ${ec_temp_coeff}
+                  - delay: 2s
+                  - script.execute: check_ec_temp_coeff
+                  - script.wait: check_ec_temp_coeff
+      - if:
+          condition:
+            lambda: "return id(ec_temp_coeff_ok);"
+          then:
+            - logger.log:
+                level: INFO
+                format: "EC temperature coefficient confirmed at %s %%/°C (register 0x0022)"
+                args: ['"${ec_temp_coeff}"']
+          else:
+            - logger.log:
+                level: ERROR
+                format: "Could not set EC temperature coefficient to %s %%/°C - see the Modbus warnings above"
+                args: ['"${ec_temp_coeff}"']
 
 sensor:
   # -------------------------------------------------------------------------
@@ -195,6 +265,19 @@ sensor:
     accuracy_decimals: 2
     filters:
       - multiply: 0.001   # register µS/cm -> mS/cm
+
+  # EC temperature coefficient read-back (register 0x0022), used only by the
+  # check_ec_temp_coeff script. Unlike the number entity, which shows a new
+  # value as soon as it is written, this only changes when the probe replies.
+  - platform: modbus_controller
+    modbus_controller_id: substrate_probe_config
+    id: substrate_ec_temp_coeff_readback
+    internal: true
+    address: 0x0022
+    register_type: holding
+    value_type: U_WORD
+    filters:
+      - multiply: 0.1     # register 20 -> 2.0 %/°C
 
   # -------------------------------------------------------------------------
   # Derived values

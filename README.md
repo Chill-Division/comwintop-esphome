@@ -49,7 +49,7 @@ All six configs pass `esphome config` on ESPHome 2026.9.0 (the partials when inc
 
 ## Known issues
 
-- The THC-S config writes the EC temperature-compensation coefficient (`ec_temp_coeff`, default 2.0 %/°C) to the probe at boot, but on our test unit the register still read back 0.0 afterwards, so compensation stayed off. Check the *Substrate EC Temp Coefficient* entity after flashing.
+- **THC-S EC temperature coefficient.** An earlier version wrote `ec_temp_coeff` (default 2.0 %/°C) to the probe once at boot, and on our test unit the register still read back 0.0, so compensation stayed off. The config now waits for the probe to respond, writes only if the stored value differs, reads it back to confirm and retries up to three times. This hasn't been confirmed on hardware yet: after flashing, look for `EC temperature coefficient confirmed` in the boot log, or check the *Substrate EC Temp Coefficient* entity.
 
 ## Vendor manuals
 
