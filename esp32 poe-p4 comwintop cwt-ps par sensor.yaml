@@ -1,0 +1,103 @@
+# =============================================================================
+# ComWinTop CWT-PS Plant Photosynthetic (PAR) Transmitter (0-2500 umol/m2.s)
+# Manual: "CWT-PS Plant photosynthetic transmitter manuals/
+#          CWT-PS  Plant photosynthetic transmitter manual (RS485 type).pdf"
+#
+# Wiring: Brown = Power+ (7-30VDC) | Black = Power- | Green = 485+ | Blue = 485-
+# Serial: 4800,n,8,1 (factory default) | Device address: 1 (factory default)
+# Install: mount level (use the bubble level), remove protective cover after install
+# =============================================================================
+
+# Setup the UART bus for RS485
+uart:
+  id: uart_bus
+  tx_pin: 53 # < for PoE-P4
+  rx_pin: 54 # < for PoE-P4
+  baud_rate: 4800 # Default per manual
+  stop_bits: 1
+
+# Configure Modbus
+modbus:
+  uart_id: uart_bus
+  id: modbus_hub
+
+modbus_controller:
+  - id: par_sensor
+    address: 0x01 # Default Device Address is 1
+    modbus_id: modbus_hub
+    setup_priority: -10
+    update_interval: 10s
+
+sensor:
+  # Photosynthetically Active Radiation (PAR / PPFD)
+  # Register: 0x0000 | Unit: 1 umol/m2.s (no scaling needed)
+  # Manual table says function code "0x30" but all example frames use 0x03,
+  # hence register_type: holding. Fall back to register_type: read on timeouts.
+  - platform: modbus_controller
+    modbus_controller_id: par_sensor
+    name: "PAR"
+    id: par_value
+    address: 0x0000
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "µmol/m²·s"
+    state_class: measurement
+    icon: mdi:white-balance-sunny
+    accuracy_decimals: 0
+
+  # Optional: rough conversion to solar irradiance (W/m2).
+  # For sunlight, 1 W/m2 of 400-700nm light is approx 4.57 umol/m2.s.
+  # Under LED/HPS grow lights this factor is different - treat as an estimate.
+  # - platform: copy
+  #   source_id: par_value
+  #   name: "PAR Irradiance (approx)"
+  #   unit_of_measurement: "W/m²"
+  #   device_class: irradiance
+  #   state_class: measurement
+  #   accuracy_decimals: 1
+  #   filters:
+  #     - multiply: 0.2188 # 1 / 4.57
+
+  # Optional: Daily Light Integral (DLI) in mol/m2/day.
+  # Requires a time source. If your shared/base config does not already have
+  # one, uncomment the time: block below as well.
+  # - platform: integration
+  #   name: "Daily Light Integral"
+  #   id: par_dli
+  #   sensor: par_value
+  #   time_unit: s
+  #   restore: true
+  #   unit_of_measurement: "mol/m²"
+  #   state_class: total_increasing
+  #   accuracy_decimals: 2
+  #   filters:
+  #     - multiply: 0.000001 # umol -> mol
+
+# time:
+#   - platform: homeassistant
+#     id: ha_time
+#     on_time:
+#       - seconds: 0
+#         minutes: 0
+#         hours: 0
+#         then:
+#           - sensor.integration.reset: par_dli
+
+number:
+  # PAR Calibration offset - register 0x0052, unit 1 umol/m2.s, Read/Write.
+  # Written straight into the sensor's own memory (persists across power cycles).
+  # Workflow: compare against a reference quantum meter under stable light,
+  # then adjust this offset until the PAR reading matches.
+  - platform: modbus_controller
+    modbus_controller_id: par_sensor
+    name: "PAR Calibration Offset"
+    id: par_calibration
+    register_type: holding
+    address: 0x0052
+    value_type: S_WORD
+    unit_of_measurement: "µmol/m²·s"
+    entity_category: config
+    icon: mdi:tune
+    min_value: -500
+    max_value: 500
+    step: 1

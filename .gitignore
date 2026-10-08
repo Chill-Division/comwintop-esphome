@@ -1,0 +1,10 @@
+# Publish only the ESPHome configs and repo docs. Everything else in this
+# folder (vendor manuals, editor/tool settings, ESPHome build output) stays local.
+/*
+!/.gitignore
+!/README.md
+!/LICENSE
+!/*.yaml
+
+# Never publish ESPHome secrets
+/secrets.yaml

@@ -1,0 +1,120 @@
+# =============================================================================
+# ComWinTop CWT-LEAF-TH-S-N Leaf Surface Temperature & Humidity Sensor
+# Manual: "Leaf Surface Temperature and Humidity Sensor Manuals/
+#          CWT-LEAF-TH  Leaf Surface Temperature and Humidity Sensor Manual (RS485 type).pdf"
+#
+# Wiring: Brown = Power+ (DC4.5-30V) | Black = GND | Yellow = RS485 A+ | Blue = RS485 B-
+#         (note: this one uses YELLOW for A+, unlike most of the other CWT sensors)
+# Serial: 4800,n,8,1 (factory default) | Device address: 1 (factory default)
+#
+# NOTE: the "humidity" channel is leaf surface WETNESS (moisture on the pad),
+# not air humidity. Dry pad = ~0%; it spikes with dew/misting/condensation.
+#
+# CALIBRATION: this sensor stores user calibration offsets in its own registers
+# (0x0050 temperature, 0x0051 wetness, both in 0.1 units). They are exposed
+# below as adjustable "number" entities in Home Assistant, so the workflow is:
+#   1. Temperature: settle next to a trusted reference thermometer and set the
+#      offset to the correction needed.
+#   2. Wetness: with the pad clean and bone dry it should read 0%; only trim
+#      the offset if the dry baseline drifts off zero.
+#   3. Offsets are written into the sensor itself and persist across power
+#      cycles - no reflash required.
+# =============================================================================
+
+# Setup the UART bus for RS485
+uart:
+  id: uart_bus
+  tx_pin: 53 # < for PoE-P4
+  rx_pin: 54 # < for PoE-P4
+  baud_rate: 4800 # Default per manual
+  stop_bits: 1
+
+# Configure Modbus
+modbus:
+  uart_id: uart_bus
+  id: modbus_hub
+
+modbus_controller:
+  - id: leaf_probe
+    address: 0x01 # Default Device Address is 1
+    modbus_id: modbus_hub
+    setup_priority: -10
+    update_interval: 10s
+
+sensor:
+  # Leaf Wetness (surface moisture on the leaf-shaped dielectric pad)
+  # Register: 0x0000 | Unit: 0.1 % (manual calls it %RH, but this measures
+  # water ON the pad surface, not air humidity - a dry pad reads ~0% and the
+  # value spikes with dew, misting or condensation. Use it as a leaf-wetness /
+  # disease-pressure signal, not canopy RH.)
+  # Manual table says function code "0x30" but all example frames use 0x03,
+  # hence register_type: holding. Fall back to register_type: read on timeouts.
+  - platform: modbus_controller
+    modbus_controller_id: leaf_probe
+    name: "Leaf Wetness"
+    id: leaf_wetness
+    address: 0x0000
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "%"
+    state_class: measurement
+    icon: mdi:water
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  # Leaf Surface Temperature
+  # Register: 0x0001 | Unit: 0.1 C
+  # Manual: negative values are sent as complement, so S_WORD (signed)
+  - platform: modbus_controller
+    modbus_controller_id: leaf_probe
+    name: "Leaf Surface Temperature"
+    id: leaf_temperature
+    address: 0x0001
+    register_type: holding
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+number:
+  # Temperature calibration offset - register 0x0050, 0.1 C per count, R/W.
+  # lambda scales the raw register for display; multiply scales the entered
+  # value back to register counts on write (0.5 C -> 5).
+  - platform: modbus_controller
+    modbus_controller_id: leaf_probe
+    name: "Leaf Temp Calibration Offset"
+    id: leaf_temp_cal
+    register_type: holding
+    address: 0x0050
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    entity_category: config
+    icon: mdi:thermometer-lines
+    min_value: -10
+    max_value: 10
+    step: 0.1
+    lambda: "return x * 0.1;"
+    multiply: 10
+
+  # Wetness calibration offset - register 0x0051, 0.1 % per count, R/W.
+  # Note: this trims the wetness reading's baseline - do NOT use it to try to
+  # match an air hygrometer; a dry pad correctly reads 0%.
+  - platform: modbus_controller
+    modbus_controller_id: leaf_probe
+    name: "Leaf Wetness Calibration Offset"
+    id: leaf_wetness_cal
+    register_type: holding
+    address: 0x0051
+    value_type: S_WORD
+    unit_of_measurement: "%"
+    entity_category: config
+    icon: mdi:water-percent
+    min_value: -20
+    max_value: 20
+    step: 0.1
+    lambda: "return x * 0.1;"
+    multiply: 10

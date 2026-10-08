@@ -1,0 +1,95 @@
+# =============================================================================
+# ComWinTop CWT-BL-EC-4400-S Water EC/TDS Transmitter (0-4400 uS/cm range)
+# Manual: "water quality sensor manual/CWT-BL water EC sensor manaul.pdf"
+#         + "water quality sensor manual/EC calibration.pdf"
+#
+# Wiring (screw terminals): 1 = DC12-24V power+ | 2 = RS485 A+ | 3 = power- | 4 = RS485 B-
+# Serial: 9600,n,8,1 (factory default - NOTE: different from the 4800 CWT probes!)
+# Device address: 1 (factory default)
+#
+# CALIBRATION is done on the transmitter itself with the button (see
+# "EC calibration.pdf"): zero-cal in air/dry, then standard-point cal in
+# 1413 uS/cm solution for this 0-4400 range. There is no calibration register
+# to expose over Modbus - register 0x0000 only reports the calibration
+# solution value the transmitter is using (shown below as a diagnostic).
+# =============================================================================
+
+# Setup the UART bus for RS485
+uart:
+  id: uart_bus
+  tx_pin: 53 # < for PoE-P4
+  rx_pin: 54 # < for PoE-P4
+  baud_rate: 9600 # Default per manual for the CWT-BL EC transmitter
+  stop_bits: 1
+
+# Configure Modbus
+modbus:
+  uart_id: uart_bus
+  id: modbus_hub
+
+modbus_controller:
+  - id: water_ec_probe
+    address: 0x01 # Default Device Address is 1
+    modbus_id: modbus_hub
+    setup_priority: -10
+    update_interval: 10s
+
+sensor:
+  # Water EC
+  # Register: 0x0001 | Function code 03 | Scale: 0.1 uS/cm on the 0-4400 range
+  # (manual note: only the 0-44000 range uses scale 1)
+  # If the transmitter was ordered/configured in TDS mode this same register
+  # reports TDS in ppm instead - rename accordingly if readings look halved.
+  - platform: modbus_controller
+    modbus_controller_id: water_ec_probe
+    name: "Water EC"
+    id: water_ec
+    address: 0x0001
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "µS/cm"
+    state_class: measurement
+    icon: mdi:flash-triangle
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  # Calibration solution value the transmitter is currently calibrated against.
+  # Register: 0x0000 | Scale: 0.1 | Should read ~1413 uS/cm on this range.
+  # Useful sanity check that a button-calibration actually saved.
+  - platform: modbus_controller
+    modbus_controller_id: water_ec_probe
+    name: "EC Calibration Solution Value"
+    id: water_ec_cal_solution
+    address: 0x0000
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "µS/cm"
+    entity_category: diagnostic
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  # Reservoir EC in mS/cm - same convention as the "ppm500" entities on the
+  # substrate THC-S device, so the two are directly comparable in HA.
+  - platform: template
+    name: "Water EC mS"
+    id: water_ec_ms
+    unit_of_measurement: "ppm500"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: 10s
+    lambda: |-
+      if (isnan(id(water_ec).state)) return NAN;
+      return id(water_ec).state / 1000.0;
+
+  # Optional: TDS estimate in ppm using the 0.5 (ppm500 / NaCl) factor.
+  # - platform: template
+  #   name: "Water TDS (est)"
+  #   unit_of_measurement: "ppm"
+  #   state_class: measurement
+  #   accuracy_decimals: 0
+  #   update_interval: 10s
+  #   lambda: |-
+  #     if (isnan(id(water_ec).state)) return NAN;
+  #     return id(water_ec).state * 0.5;

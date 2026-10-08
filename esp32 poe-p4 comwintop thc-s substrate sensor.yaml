@@ -1,0 +1,251 @@
+# These substitutions allow the end user to override certain values
+substitutions:
+  name: "gt4-substrate1"
+  friendly_name: "GT4-substrate1"
+  # Modbus slave address of the THC-S probe (factory default 1)
+  modbus_address: "1"
+  # How often the probe is polled. Derived sensors update on the same cadence.
+  poll_interval: "10s"
+  # EC temperature-compensation coefficient in %/°C, written to the probe at boot.
+  # The CWT THC-S ships with this at 0.0 (compensation OFF). 2.0 is the usual
+  # value for nutrient solutions and what the "other" vendor's probe defaults to.
+  ec_temp_coeff: "2.0"
+
+esphome:
+  name: "${name}"
+  # Friendly names are used where appropriate in Home Assistant
+  friendly_name: "${friendly_name}"
+  # Automatically add the mac address to the name
+  # so you can use a single firmware for all devices
+  name_add_mac_suffix: false
+
+  # This will allow for (future) project identification,
+  # configuration and updates.
+  project:
+    name: chill-division.poep4-preprov
+    version: "1.1"
+
+  # Apply the EC temperature-compensation coefficient every boot so the probe
+  # is always in a known state. Priority -100 runs after all components are set up.
+  on_boot:
+    priority: -100
+    then:
+      - number.set:
+          id: substrate_ec_temp_coeff
+          value: ${ec_temp_coeff}
+      - logger.log:
+          format: "Wrote EC temperature coefficient %s %%/°C to probe register 0x0022"
+          args: ['"${ec_temp_coeff}"']
+
+esp32:
+  # Using the generic P4 board target
+  board: esp32-p4
+  framework:
+    type: esp-idf
+  # Unit PoE P4 has 32MB Octal PSRAM.
+  # This config ensures the app doesn't hang trying to init it.
+    sdkconfig_options:
+      CONFIG_SPIRAM: y
+      CONFIG_SPIRAM_MODE_OCT: y
+      CONFIG_SPIRAM_SPEED_80M: y
+  # Matches the M5Stack hardware spec
+  cpu_frequency: 360MHz
+  # Fixes the 4MB/16MB mismatch
+  flash_size: 16MB
+
+# To be able to get logs from the device via serial and api.
+logger:
+
+# API is a requirement of the dashboard import.
+api:
+
+# OTA is required for Over-the-Air updating
+ota:
+  platform: esphome
+
+ethernet:
+  # The Unit PoE P4 PHY is an IP101. (Selecting JL1101 gives a "Wrong Chip OUI" error.)
+  type: IP101
+  mdc_pin: GPIO31
+  mdio_pin: GPIO52
+  phy_addr: 1
+  power_pin: GPIO51
+  clk:
+    pin: 50
+    mode: CLK_EXT_IN
+
+web_server:
+  port: 80
+
+# Default i2c ports for the UnitP4, uncomment the four lines below
+# i2c:
+#   sda: 53
+#   scl: 54
+#   scan: true
+#   id: bus_1
+
+# Setup the UART bus for RS485
+uart:
+  id: uart_bus
+  tx_pin: 53
+  rx_pin: 54
+  baud_rate: 4800 # Default per THC-S manual
+  stop_bits: 1
+
+# Configure Modbus
+modbus:
+  uart_id: uart_bus
+  id: modbus_hub
+
+modbus_controller:
+  - id: substrate_probe
+    address: ${modbus_address}
+    modbus_id: modbus_hub
+    setup_priority: -10
+    update_interval: ${poll_interval}
+    on_online:
+      - logger.log: "Substrate probe is responding on Modbus"
+    on_offline:
+      - logger.log:
+          level: WARN
+          format: "Substrate probe stopped responding on Modbus"
+
+  # Second controller on the same probe, polled slowly, for config registers
+  # that don't need re-reading every cycle. (This replaces the deprecated
+  # skip_updates option, per the ESPHome 2026.9 warning.)
+  - id: substrate_probe_config
+    address: ${modbus_address}
+    modbus_id: modbus_hub
+    setup_priority: -10
+    update_interval: 60s
+
+# ---------------------------------------------------------------------------
+# Probe configuration registers (holding registers, function code 0x03 / 0x06)
+# ---------------------------------------------------------------------------
+number:
+  # Register 0x0022 | "Conductivity factor" | 0-100 = 0.0%-10.0% per °C
+  # Factory default is 0 (no temperature compensation). Set at boot from the
+  # ec_temp_coeff substitution above; this entity lets you see and adjust it
+  # from Home Assistant. Note a reboot re-applies the substitution value.
+  - platform: modbus_controller
+    modbus_controller_id: substrate_probe_config   # slow-poll controller
+    name: "Substrate EC Temp Coefficient"
+    id: substrate_ec_temp_coeff
+    address: 0x0022
+    register_type: holding
+    value_type: U_WORD
+    multiply: 10          # entity value 2.0 %/°C  <->  register value 20
+    min_value: 0
+    max_value: 10
+    step: 0.1
+    unit_of_measurement: "%/°C"
+    entity_category: config
+
+sensor:
+  # -------------------------------------------------------------------------
+  # Raw probe readings (input registers, function code 0x04)
+  # -------------------------------------------------------------------------
+  # Volumetric water content. The CWT manual calls this "Humidity" in %RH,
+  # but it is the moisture content of the substrate, not air humidity.
+  # Register: 0x0000 | Unit: 0.1%
+  - platform: modbus_controller
+    modbus_controller_id: substrate_probe
+    name: "Substrate vWC (Humidity)"
+    id: substrate_humidity
+    address: 0x0000
+    register_type: input
+    value_type: U_WORD
+    unit_of_measurement: "%"
+    device_class: moisture
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  # Temperature
+  # Register: 0x0001 | Unit: 0.1°C
+  # Note: Manual states negative values use complement, so we use S_WORD (Signed)
+  - platform: modbus_controller
+    modbus_controller_id: substrate_probe
+    name: "Substrate Temperature"
+    id: substrate_temperature
+    address: 0x0001
+    register_type: input
+    value_type: S_WORD
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  # Electrical Conductivity (EC), bulk
+  # Register: 0x0002 | Unit: 1 us/cm (manual says "0-20000us/cm" with value 1 = 1)
+  # Converted here to mS/cm, the scale most EC meters and feed charts use.
+  # This is Bulk EC: the conductivity of the whole substrate + water + air matrix.
+  - platform: modbus_controller
+    modbus_controller_id: substrate_probe
+    name: "Substrate Conductivity"
+    id: substrate_conductivity
+    address: 0x0002
+    register_type: input
+    value_type: U_WORD
+    unit_of_measurement: "mS/cm"
+    state_class: measurement
+    accuracy_decimals: 2
+    filters:
+      - multiply: 0.001   # register µS/cm -> mS/cm
+
+  # -------------------------------------------------------------------------
+  # Derived values
+  # -------------------------------------------------------------------------
+  # Bulk EC in dS/m, the standard agronomy/soil-science unit.
+  # 1 dS/m = 1 mS/cm, so the number is identical to Substrate Conductivity —
+  # this entity just exists for dashboards/charts that are labelled in dS/m.
+  # (No "/" in the name: ESPHome reserves it as a URL path separator.)
+  - platform: template
+    name: "Substrate Bulk EC"
+    id: substrate_bulk_ec_dsm
+    unit_of_measurement: "dS/m"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: ${poll_interval}
+    lambda: |-
+      const float ec_ms = id(substrate_conductivity).state;
+      if (std::isnan(ec_ms)) return NAN;
+      return ec_ms;
+
+  # Pore Water EC (the conductivity of just the water available to the roots).
+  # A proper calculation (Hilhorst) needs the dielectric permittivity, which
+  # this probe does not report, so we use the simple approximation
+  #   pwEC = bulk EC / VWC
+  # Treat it as a trend indicator rather than an absolute number.
+  - platform: template
+    name: "Substrate Estimated pwEC"
+    id: estimated_pwec
+    unit_of_measurement: "mS/cm"
+    state_class: measurement
+    accuracy_decimals: 2
+    update_interval: ${poll_interval}
+    lambda: |-
+      const float bulk_ms = id(substrate_conductivity).state;  // already mS/cm
+      const float vwc_pct = id(substrate_humidity).state;
+      if (std::isnan(bulk_ms) || std::isnan(vwc_pct)) return NAN;
+      // Below ~5% VWC the ratio blows up and means nothing; report unknown.
+      if (vwc_pct < 5.0f) return NAN;
+      const float vwc = vwc_pct / 100.0f;      // % -> fraction
+      return bulk_ms / vwc;
+
+  # Same value on the ppm500 scale (1 mS/cm = 500 ppm) for comparing against
+  # a runoff / reservoir TDS meter set to the 500 scale.
+  - platform: template
+    name: "Substrate Estimated pwEC (ppm500)"
+    id: estimated_pwec_ppm500
+    unit_of_measurement: "ppm"
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: ${poll_interval}
+    lambda: |-
+      const float pwec = id(estimated_pwec).state;
+      if (std::isnan(pwec)) return NAN;
+      return pwec * 500.0f;

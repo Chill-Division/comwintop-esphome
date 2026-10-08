@@ -1,0 +1,76 @@
+# =============================================================================
+# ComWinTop CWT-SWS-C-RS485 Wind Speed Sensor (Polycarbonate casing, 0-70 m/s)
+# Manual: "Wind speed and direction manual/CWT-SWS Wind Speed Sensor manual/
+#          CWT-SWS-C-RS485 manual (Polycarbonate casing, RS485 type).pdf"
+#
+# Wiring: Brown = Power+ (10-30VDC) | Black = Power- | Green (or Yellow) = A+ | Blue = B-
+# Serial: 4800,n,8,1 (factory default) | Device address: 1 (factory default)
+# =============================================================================
+
+# Setup the UART bus for RS485
+uart:
+  id: uart_bus
+  tx_pin: 53 # < for PoE-P4
+  rx_pin: 54 # < for PoE-P4
+  baud_rate: 4800 # Default per manual
+  stop_bits: 1
+
+# Configure Modbus
+modbus:
+  uart_id: uart_bus
+  id: modbus_hub
+
+modbus_controller:
+  - id: wind_sensor
+    address: 0x01 # Default Device Address is 1
+    modbus_id: modbus_hub
+    setup_priority: -10
+    update_interval: 10s # Wind is gusty - drop to 3-5s if you want faster response
+
+sensor:
+  # Wind Speed
+  # Register: 0x0000 | Scale: 0.1 m/s
+  # Note: manual's register table says function code "0x30" but every example
+  # frame in the same manual uses 0x03 (read holding), hence register_type: holding.
+  # If the device ever times out, try register_type: read (FC 0x04) instead -
+  # that is what the working THC-S config uses and CWT firmware answers both.
+  - platform: modbus_controller
+    modbus_controller_id: wind_sensor
+    name: "Wind Speed"
+    id: wind_speed
+    address: 0x0000
+    register_type: holding
+    value_type: U_WORD
+    unit_of_measurement: "m/s"
+    device_class: wind_speed
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.1
+
+  # Wind Gust - highest reading seen in the last minute (6 samples @ 10s)
+  - platform: copy
+    source_id: wind_speed
+    name: "Wind Gust (1min max)"
+    id: wind_gust
+    unit_of_measurement: "m/s"
+    device_class: wind_speed
+    state_class: measurement
+    accuracy_decimals: 1
+    filters:
+      - max:
+          window_size: 6
+          send_every: 6
+          send_first_at: 6
+
+  # Optional: same reading in km/h, uncomment if you prefer that unit in HA
+  # (or just change the unit conversion on the entity inside Home Assistant)
+  # - platform: copy
+  #   source_id: wind_speed
+  #   name: "Wind Speed km/h"
+  #   unit_of_measurement: "km/h"
+  #   device_class: wind_speed
+  #   state_class: measurement
+  #   accuracy_decimals: 1
+  #   filters:
+  #     - multiply: 3.6

@@ -1,0 +1,87 @@
+# =============================================================================
+# ComWinTop CWT-WLS Submersible Water Level Sensor (ordered range: 0-2 mH2O)
+# Docs: "CWT-WLS water level sensor manual/RS485 type Modbus communication protocol (V1.4).pdf"
+#       "CWT-WLS water level sensor manual/CWT-WLS water level sensor datasheet.pdf"
+#       "CWT-WLS water level sensor manual/RS485 wiring.txt"
+#
+# Wiring (per RS485 wiring.txt): Red = V+ (10-30VDC, 24V nominal) | Black = GND
+#                                Blue = A+ | White = B-
+#   (the datasheet diagram shows Blue=A / Yellow=B on some builds - the txt
+#    file from the vendor for THIS sensor says Blue = A+, White = B-)
+# Serial: 9600,n,8,1 (factory default - NOTE: different from the 4800 CWT probes!)
+# Device address: 1 (factory default)
+#
+# We read the Float32 measuring value (registers 0x0016/0x0017) instead of the
+# int16 register, because the float already includes the decimal point - no
+# guessing against the "decimal places" register needed. Value arrives in the
+# unit the transmitter is configured for (unit register 0x0002; a level sensor
+# ordered in mH2O reports meters of water column, so ~= meters of depth).
+# The sensor has a ~20mm blind area at the very bottom of the probe.
+# =============================================================================
+
+# Setup the UART bus for RS485
+uart:
+  id: uart_bus
+  tx_pin: 53 # < for PoE-P4
+  rx_pin: 54 # < for PoE-P4
+  baud_rate: 9600 # Default per manual for the CWT-WLS
+  stop_bits: 1
+
+# Configure Modbus
+modbus:
+  uart_id: uart_bus
+  id: modbus_hub
+
+modbus_controller:
+  - id: water_level_probe
+    address: 0x01 # Default Device Address is 1
+    modbus_id: modbus_hub
+    setup_priority: -10
+    update_interval: 10s
+
+sensor:
+  # Water Level (depth of water above the probe tip)
+  # Registers: 0x0016-0x0017 | Float32, function code 0x03
+  # Data mode register 0x000B defaults to big-endian => FP32.
+  # If readings are garbage (huge/tiny numbers), try value_type: FP32_R.
+  - platform: modbus_controller
+    modbus_controller_id: water_level_probe
+    name: "Water Level"
+    id: water_level
+    address: 0x0016
+    register_type: holding
+    value_type: FP32
+    unit_of_measurement: "m"
+    device_class: distance
+    state_class: measurement
+    accuracy_decimals: 3
+
+  # Diagnostic: which unit the transmitter thinks it is reporting.
+  # Register 0x0002: 0=MPa 1=kPa 2=Pa 3=bar 4=mbar 5=kg/cm2 6=psi 7=mH2O 8=mmH2O
+  # Expect 7 (mH2O) for this sensor. If it reads 8 (mmH2O), the Water Level
+  # sensor above needs "- multiply: 0.001" to convert to meters.
+  - platform: modbus_controller
+    modbus_controller_id: water_level_probe
+    name: "Water Level Unit Code"
+    id: water_level_unit_code
+    address: 0x0002
+    register_type: holding
+    value_type: U_WORD
+    entity_category: diagnostic
+    accuracy_decimals: 0
+
+  # Reservoir fill percentage, based on the ordered 0-2 m range.
+  # Change 2.0 to the actual full depth of YOUR reservoir if the tank is
+  # shallower than the sensor's full scale.
+  - platform: template
+    name: "Reservoir Percent Full"
+    id: reservoir_percent_full
+    unit_of_measurement: "%"
+    state_class: measurement
+    icon: mdi:water-percent
+    accuracy_decimals: 1
+    update_interval: 10s
+    lambda: |-
+      if (isnan(id(water_level).state)) return NAN;
+      float pct = id(water_level).state / 2.0 * 100.0;
+      return clamp(pct, 0.0f, 100.0f);
