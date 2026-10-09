@@ -7,14 +7,14 @@ ESPHome configs for reading ComWinTop (CWT) RS485 Modbus sensors with an M5Stack
 
 ## Sensors
 
-| Sensor | Measures | Baud |
-| --- | --- | --- |
-| [THC-S substrate probe](esp32%20poe-p4%20comwintop%20thc-s%20substrate%20sensor.yaml) | Substrate moisture (VWC), temperature and bulk EC, plus an estimated pore-water EC | 4800 |
-| [CWT-BL-EC-4400-S water EC transmitter](esp32%20poe-p4%20comwintop%20cwt-bl-ec%20water%20ec%20sensor.yaml) | Water EC, 0–4400 µS/cm | 9600 |
-| [CWT-LEAF-TH leaf sensor](esp32%20poe-p4%20comwintop%20cwt-leaf-th%20leaf%20surface%20sensor.yaml) | Leaf wetness and leaf surface temperature | 4800 |
-| [CWT-PS PAR transmitter](esp32%20poe-p4%20comwintop%20cwt-ps%20par%20sensor.yaml) | PAR (PPFD), 0–2500 µmol/m²·s | 4800 |
-| [CWT-SWS-C wind speed sensor](esp32%20poe-p4%20comwintop%20cwt-sws-c%20wind%20speed%20sensor.yaml) | Wind speed (0–70 m/s) and 1-minute gust | 4800 |
-| [CWT-WLS water level sensor](esp32%20poe-p4%20comwintop%20cwt-wls%20water%20level%20sensor.yaml) | Water level (0–2 m range) and reservoir % full | 9600 |
+| Sensor | Measures | Baud | Supply |
+| --- | --- | --- | --- |
+| [THC-S substrate probe](esp32%20poe-p4%20comwintop%20thc-s%20substrate%20sensor.yaml) | Substrate moisture (VWC), temperature and bulk EC, plus an estimated pore-water EC | 4800 | 5–30 V DC |
+| [CWT-BL-EC-4400-S water EC transmitter](esp32%20poe-p4%20comwintop%20cwt-bl-ec%20water%20ec%20sensor.yaml) | Water EC, 0–4400 µS/cm | 9600 | 12–24 V DC |
+| [CWT-LEAF-TH leaf sensor](esp32%20poe-p4%20comwintop%20cwt-leaf-th%20leaf%20surface%20sensor.yaml) | Leaf wetness and leaf surface temperature | 4800 | 10–30 V DC |
+| [CWT-PS PAR transmitter](esp32%20poe-p4%20comwintop%20cwt-ps%20par%20sensor.yaml) | PAR (PPFD), 0–2500 µmol/m²·s | 4800 | 7–30 V DC |
+| [CWT-SWS-C wind speed sensor](esp32%20poe-p4%20comwintop%20cwt-sws-c%20wind%20speed%20sensor.yaml) | Wind speed (0–70 m/s) and 1-minute gust | 4800 | 10–30 V DC |
+| [CWT-WLS water level sensor](esp32%20poe-p4%20comwintop%20cwt-wls%20water%20level%20sensor.yaml) | Water level (0–2 m range) and reservoir % full | 9600 | 10–30 V DC |
 
 Every config assumes the sensor's factory defaults: Modbus address 1, 8 data bits, no parity and 1 stop bit, at the baud rate above.
 
@@ -22,6 +22,7 @@ Every config assumes the sensor's factory defaults: Modbus address 1, 8 data bit
 
 - **Controller:** M5Stack Unit PoE P4 (ESP32-P4 with an IP101 Ethernet PHY), powered over PoE.
 - **RS485:** a TTL-to-RS485 transceiver on GPIO53 (TX) and GPIO54 (RX). No flow-control (DE/RE) pin is configured, so use a transceiver with automatic direction control.
+- **Sensor power:** check each sensor's supply range in the table above. Most need 10 V or more, so they won't run off the 3.3 V or 5 V an RS485 adaptor passes through; the CWT-SWS-C anemometer simply never answers on 5 V. Use a 12 V or 24 V supply (a PoE-to-12 V splitter works) and connect its negative to the adaptor's GND, since the sensors have no separate signal ground.
 - **One sensor per board.** Each config sets up its own UART and Modbus bus and expects its sensor at address 1. To share one bus between several sensors, give each a unique Modbus address and merge them under a single `uart:` / `modbus:` block.
 
 Wire colours vary between CWT models (RS485 A+ is green on some, yellow or blue on others). The header comment in each CWT-* config lists that sensor's wiring; for the THC-S, follow its manual.
@@ -46,10 +47,7 @@ All six configs pass `esphome config` on ESPHome 2026.9.0 (the partials when inc
 - **Estimated pore-water EC is an approximation.** It's bulk EC ÷ VWC rather than the Hilhorst model, which needs a dielectric permittivity reading the THC-S doesn't provide. Use it for trends, not absolute values. It reports unknown below 5% VWC, and it equals bulk EC whenever the probe reads 100% VWC (for example, sitting in a beaker of solution).
 - **EC units.** The THC-S reports substrate EC in mS/cm, plus a dS/m copy for agronomy-style dashboards (1 dS/m = 1 mS/cm). The water EC transmitter reports µS/cm, plus an mS/cm copy so reservoir and substrate EC can be compared directly.
 - **Calibration.** The leaf sensor (registers 0x0050 and 0x0051) and PAR sensor (0x0052) store calibration offsets in the sensor itself, and the configs expose them as Home Assistant number entities. The water EC transmitter is calibrated with its own button (zero, then a 1413 µS/cm standard); its config only reports the stored calibration value as a diagnostic.
-
-## Known issues
-
-- **THC-S EC temperature coefficient.** An earlier version wrote `ec_temp_coeff` (default 2.0 %/°C) to the probe once at boot, and on our test unit the register still read back 0.0, so compensation stayed off. The config now waits for the probe to respond, writes only if the stored value differs, reads it back to confirm and retries up to three times. This hasn't been confirmed on hardware yet: after flashing, look for `EC temperature coefficient confirmed` in the boot log, or check the *Substrate EC Temp Coefficient* entity.
+- **EC temperature compensation (THC-S).** The probe ships with it switched off (0.0 %/°C). At boot the config waits for the probe to respond, writes `ec_temp_coeff` (default 2.0 %/°C) only if the stored value differs, then reads it back to confirm, retrying up to three times. Look for `EC temperature coefficient confirmed` in the boot log; this has been confirmed working on our test unit.
 
 ## Vendor manuals
 
