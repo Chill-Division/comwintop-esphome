@@ -7,16 +7,16 @@ ESPHome configs for reading ComWinTop (CWT) RS485 Modbus sensors with an M5Stack
 
 ## Sensors
 
-| Sensor | Measures | Baud | Supply |
-| --- | --- | --- | --- |
-| [THC-S substrate probe](esp32%20poe-p4%20comwintop%20thc-s%20substrate%20sensor.yaml) | Substrate moisture (VWC), temperature and bulk EC, plus an estimated pore-water EC | 4800 | 5–30 V DC |
-| [CWT-BL-EC-4400-S water EC transmitter](esp32%20poe-p4%20comwintop%20cwt-bl-ec%20water%20ec%20sensor.yaml) | Water EC, 0–4400 µS/cm | 9600 | 12–24 V DC |
-| [CWT-LEAF-TH leaf sensor](esp32%20poe-p4%20comwintop%20cwt-leaf-th%20leaf%20surface%20sensor.yaml) | Leaf wetness and leaf surface temperature | 4800 | 10–30 V DC |
-| [CWT-PS PAR transmitter](esp32%20poe-p4%20comwintop%20cwt-ps%20par%20sensor.yaml) | PAR (PPFD), 0–2500 µmol/m²·s | 4800 | 7–30 V DC |
-| [CWT-SWS-C wind speed sensor](esp32%20poe-p4%20comwintop%20cwt-sws-c%20wind%20speed%20sensor.yaml) | Wind speed (0–70 m/s) and 1-minute gust | 4800 | 10–30 V DC |
-| [CWT-WLS water level sensor](esp32%20poe-p4%20comwintop%20cwt-wls%20water%20level%20sensor.yaml) | Water level (0–2 m range) and reservoir % full | 9600 | 10–30 V DC |
+| Sensor | Measures | Baud | Supply | Verified |
+| --- | --- | --- | --- | --- |
+| [THC-S substrate probe](esp32%20poe-p4%20comwintop%20thc-s%20substrate%20sensor.yaml) | Substrate moisture (VWC), temperature and bulk EC, plus an estimated pore-water EC | 4800 | 5–30 V DC | Yes |
+| [CWT-BL-EC-4400-S water EC transmitter](esp32%20poe-p4%20comwintop%20cwt-bl-ec%20water%20ec%20sensor.yaml) | Water EC, 0–4400 µS/cm | 9600 | 12–24 V DC | Not yet |
+| [CWT-LEAF-TH leaf sensor](esp32%20poe-p4%20comwintop%20cwt-leaf-th%20leaf%20surface%20sensor.yaml) | Leaf wetness and leaf surface temperature | 4800 | 10–30 V DC | Not yet |
+| [CWT-PS PAR transmitter](esp32%20poe-p4%20comwintop%20cwt-ps%20par%20sensor.yaml) | PAR (PPFD), 0–2500 µmol/m²·s | 4800 | 7–30 V DC | Yes |
+| [CWT-SWS-C wind speed sensor](esp32%20poe-p4%20comwintop%20cwt-sws-c%20wind%20speed%20sensor.yaml) | Wind speed (0–70 m/s) and 1-minute gust | 4800 | 10–30 V DC | Yes |
+| [CWT-WLS water level sensor](esp32%20poe-p4%20comwintop%20cwt-wls%20water%20level%20sensor.yaml) | Water level (0–2 m range) and reservoir % full | 9600 | 10–30 V DC | Not yet |
 
-Every config assumes the sensor's factory defaults: Modbus address 1, 8 data bits, no parity and 1 stop bit, at the baud rate above.
+Every config assumes the sensor's factory defaults: Modbus address 1, 8 data bits, no parity and 1 stop bit, at the baud rate above. **Verified** means the readings have been confirmed on a real sensor, bench-tested on an M5Stack Atom Lite with the same sensor blocks; the others pass ESPHome's config check but haven't been confirmed on hardware yet.
 
 ## Hardware
 
